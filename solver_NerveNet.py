@@ -100,10 +100,10 @@ class Solver(object):
                 #outputs.size() = [num_outputs, batchsize, channels, height, width]
                 #print('Shape: Outputs ', outputs.size())
 
-                outputs = list(map(lambda x: x.squeeze(), outputs))
+                #outputs = list(map(lambda x: x.squeeze(), outputs))
 
                 loss1 = self.loss_func(outputs[0].float(), targets1.float())
-                loss2 = self.loss_func(outputs[1].float(), targets2.float()) 
+                loss2 = self.loss_func(outputs[1].squeeze().float(), targets2.float()) 
                 loss3 = self.loss_func(outputs[2].float(), targets3.float())              
                 loss4 = self.loss_func(outputs[3].float(), targets4.float())
                 
@@ -151,7 +151,7 @@ class Solver(object):
 
                 
                 targets1 = targets['in']
-                targets2 = targets['down5']
+                targets2 = targets['down5'].squeeze()
                 targets3 = targets['up5']
                 targets4 = targets['up4']
 
@@ -164,10 +164,11 @@ class Solver(object):
                 outputs = model(inputs)
 
 
-                outputs = list(map(lambda x: x.squeeze(), outputs))
-
+                #outputs = list(map(lambda x: x.squeeze(), outputs))
+                for out in outputs:
+                    print(out.size())
                 loss1 = self.loss_func(outputs[0].float(), targets1.float())
-                loss2 = self.loss_func(outputs[1].float(), targets2.float()) 
+                loss2 = self.loss_func(outputs[1].squeeze().float(), targets2.float()) 
                 loss3 = self.loss_func(outputs[2].float(), targets3.float())              
                 loss4 = self.loss_func(outputs[3].float(), targets4.float())
                 
