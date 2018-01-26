@@ -1,11 +1,7 @@
-from random import shuffle
 import numpy as np
-#import cv2
 import torch
 from torch.autograd import Variable
-#from skimage import transform
-from torchvision import transforms
-from PIL import Image
+
 
 
 class Solver(object):
@@ -100,10 +96,10 @@ class Solver(object):
                 #outputs.size() = [num_outputs, batchsize, channels, height, width]
                 #print('Shape: Outputs ', outputs.size())
 
-                outputs = list(map(lambda x: x.squeeze(), outputs))
+                #outputs = list(map(lambda x: x.squeeze(), outputs))
 
                 loss1 = self.loss_func(outputs[0].float(), targets1.float())
-                loss2 = self.loss_func(outputs[1].float(), targets2.float()) 
+                loss2 = self.loss_func(outputs[1].squeeze().float(), targets2.float()) 
                 loss3 = self.loss_func(outputs[2].float(), targets3.float())              
                 loss4 = self.loss_func(outputs[3].float(), targets4.float())
                 
@@ -127,10 +123,10 @@ class Solver(object):
             #_, preds = torch.max(outputs, 1) 
             #torch.max(outputs, 1) takes max over channels, we have just one
 
-            gt = np.squeeze(targets1.data.cpu().numpy()) 
-            p  = outputs[0].data.cpu().numpy()
+            #gt = np.squeeze(targets1.data.cpu().numpy()) 
+            #p  = outputs[0].data.cpu().numpy()
 
-            train_acc = self.dice_coefficient(gt, p)
+            train_acc = 1 - self.loss_func(outputs[0].float(), targets1.float()) #self.dice_coefficient(gt, p)
             self.train_acc_history.append(train_acc)
             if log_nth:
                 print('[Epoch %d/%d] TRAIN acc/loss: %.3f/%.3f' % (epoch + 1,
@@ -177,9 +173,9 @@ class Solver(object):
                 val_losses.append(total_loss.data.cpu().numpy())
 
                 
-                gt = np.squeeze(targets1.data.cpu().numpy()) 
-                p  = outputs[0].data.cpu().numpy()
-                scores = self.dice_coefficient(gt, p)
+                #gt = np.squeeze(targets1.data.cpu().numpy()) 
+                #p  = outputs[0].data.cpu().numpy()
+                scores = 1 - self.loss_func(outputs[0].float(), targets1.float())#self.dice_coefficient(gt, p)
                 val_scores.append(scores)
 
             model.train()
@@ -195,10 +191,4 @@ class Solver(object):
         #                             END OF YOUR CODE                         #
         ########################################################################
         print('FINISH.')
-        
-def _resize(Y, outshape):
-    transform = transforms.ToPILImage()
-    img = transform(Y.data.cpu().numpy())
-    resized = Image.resize(img, outshape)
-    transform = transforms.ToTensor()
-    return transform(resized)
+
