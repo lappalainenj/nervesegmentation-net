@@ -133,60 +133,60 @@ class Solver(object):
                                                                    num_epochs,
                                                                    train_acc,
                                                                    train_loss))
-            # VALIDATION
-            val_losses = []
-            val_scores = []
-            model.eval()
-            for inputs, targets in val_loader:
-                
-                inputs = Variable(inputs)
-                keys = ['in', 'up4', 'up5', 'down5']
-                
-                for key in keys:
-                    targets[key] = Variable(targets[key])
-
-                
-                targets1 = targets['in']
-                targets2 = targets['down5']
-                targets3 = targets['up5']
-                targets4 = targets['up4']
-
-                if model.is_cuda:
-                    inputs, targets1 = inputs.cuda(), targets1.cuda()
-                    targets2, targets3 = targets2.cuda(), targets3.cuda()
-                    targets4 = targets4.cuda()
-                    
-                optim.zero_grad()
-                outputs = model(inputs)
-
-
-                outputs = list(map(lambda x: x.squeeze(), outputs))
-
-                loss1 = self.loss_func(outputs[0].float(), targets1.float())
-                loss2 = self.loss_func(outputs[1].float(), targets2.float()) 
-                loss3 = self.loss_func(outputs[2].float(), targets3.float())              
-                loss4 = self.loss_func(outputs[3].float(), targets4.float())
-                
-                total_loss = sum([w*l for w,l in 
-                          zip(self.loss_weights,[loss1, loss2, loss3, loss4])])
-
-                val_losses.append(total_loss.data.cpu().numpy())
-
-                
-                #gt = np.squeeze(targets1.data.cpu().numpy()) 
-                #p  = outputs[0].data.cpu().numpy()
-                scores = 1 - self.loss_func(outputs[0].float(), targets1.float())#self.dice_coefficient(gt, p)
-                val_scores.append(scores)
-
-            model.train()
-            val_acc, val_loss = np.mean(val_scores), np.mean(val_losses)
-            self.val_acc_history.append(val_acc)
-            self.val_loss_history.append(val_loss)
-            if log_nth:
-                print('[Epoch %d/%d] VAL   acc/loss: %.3f/%.3f' % (epoch + 1,
-                                                                   num_epochs,
-                                                                   val_acc,
-                                                                   val_loss))
+#            # VALIDATION
+#            val_losses = []
+#            val_scores = []
+#            model.eval()
+#            for inputs, targets in val_loader:
+#                
+#                inputs = Variable(inputs)
+#                keys = ['in', 'up4', 'up5', 'down5']
+#                
+#                for key in keys:
+#                    targets[key] = Variable(targets[key])
+#
+#                
+#                targets1 = targets['in']
+#                targets2 = targets['down5']
+#                targets3 = targets['up5']
+#                targets4 = targets['up4']
+#
+#                if model.is_cuda:
+#                    inputs, targets1 = inputs.cuda(), targets1.cuda()
+#                    targets2, targets3 = targets2.cuda(), targets3.cuda()
+#                    targets4 = targets4.cuda()
+#                    
+#                optim.zero_grad()
+#                outputs = model(inputs)
+#
+#
+#                #outputs = list(map(lambda x: x.squeeze(), outputs))
+#
+#                loss1 = self.loss_func(outputs[0].float(), targets1.float())
+#                loss2 = self.loss_func(outputs[1].squeeze().float(), targets2.float()) 
+#                loss3 = self.loss_func(outputs[2].float(), targets3.float())              
+#                loss4 = self.loss_func(outputs[3].float(), targets4.float())
+#                
+#                total_loss = sum([w*l for w,l in 
+#                          zip(self.loss_weights,[loss1, loss2, loss3, loss4])])
+#
+#                val_losses.append(total_loss.data.cpu().numpy())
+#
+#                
+#                #gt = np.squeeze(targets1.data.cpu().numpy()) 
+#                #p  = outputs[0].data.cpu().numpy()
+#                scores = 1 - self.loss_func(outputs[0].float(), targets1.float())#self.dice_coefficient(gt, p)
+#                val_scores.append(scores)
+#
+#            model.train()
+#            val_acc, val_loss = np.mean(val_scores), np.mean(val_losses)
+#            self.val_acc_history.append(val_acc)
+#            self.val_loss_history.append(val_loss)
+#            if log_nth:
+#                print('[Epoch %d/%d] VAL   acc/loss: %.3f/%.3f' % (epoch + 1,
+#                                                                   num_epochs,
+#                                                                   val_acc,
+#                                                                   val_loss))
         ########################################################################
         #                             END OF YOUR CODE                         #
         ########################################################################
