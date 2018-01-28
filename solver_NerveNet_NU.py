@@ -104,9 +104,14 @@ class Solver(object):
                     
                     self.print_iteration_results(i, epoch, num_epochs, 'TRAIN')
             
-            _, pred_label = torch.max(outputs['main'], 1)
-            pred_label = pred_label.unsqueeze(1)
-            train_acc = 1 - self.loss_func(pred_label.float(), target_main.float())
+            num_classes = outputs['main'].size(1)
+            if num_classes == 2:
+                pred_prob, pred_label = torch.max(outputs['main'], 1)
+                pred = pred_label.unsqueeze(1)
+            else:
+                pred = outputs['main']
+                
+            train_acc = 1 - self.loss_func(pred.float(), target_main.float())
             
             self.train_acc_history.append(train_acc)
             if log_nth:
@@ -150,9 +155,15 @@ class Solver(object):
 
             val_losses.append(loss.data.cpu().numpy())
             
-            _, pred_label = torch.max(outputs['main'], 1)
-            pred_label = pred_label.unsqueeze(1)
-            scores = 1 - self.loss_func(pred_label.float(), target_main.float())
+            num_classes = outputs['main'].size(1)
+            if num_classes == 2:
+                pred_prob, pred_label = torch.max(outputs['main'], 1)
+                pred = pred_label.unsqueeze(1)
+            else:
+                pred = outputs['main']
+                
+            scores = 1 - self.loss_func(pred.float(), target_main.float())
+
             val_scores.append(scores)
 
         model.train()
