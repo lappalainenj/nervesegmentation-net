@@ -13,6 +13,10 @@ class NerveNET(nn.Module):
         self.binary_out = binary_out
         self.upsample_unit = upsample_unit
         
+        if num_classes > 1:
+           activation_out = nn.Softmax(dim = 2)
+        activation_out = nn.Sigmoid()
+        
         assert upsample_unit in ['Upsample', 'ConvTranspose2d']
         if upsample_unit == 'Upsample':
             upsample_units = []
@@ -23,8 +27,6 @@ class NerveNET(nn.Module):
             upsample_units.append(nn.ConvTranspose2d(256,256,kernel_size=2,stride=2,padding=0))
             upsample_units.append(nn.ConvTranspose2d(128,128,kernel_size=2,stride=2,padding=0))
             upsample_units.append(nn.ConvTranspose2d(64, 64,kernel_size=2,stride=2,padding=0))
-        else:
-            ValueError
         
 
         self.down1 = nn.Sequential(nn.Dropout(p = dropout),
@@ -62,7 +64,7 @@ class NerveNET(nn.Module):
         W_d4 = int((W / 2**3 - 2) / 2 + 1)
         H_d4 = int((H / 2**3 - 2) / 2 + 1)
         
-        self.binary = BinaryOut(W_d4, H_d4, weight_scale)
+        self.binary = BinaryOut(W_d4, H_d4, activation_out, weight_scale)
         
         self.bottom = nn.Sequential(nn.Conv2d(256, 512, kernel_size=3, padding=1),
                                     nn.BatchNorm2d(512),
@@ -112,8 +114,7 @@ class NerveNET(nn.Module):
                                  nn.BatchNorm2d(32),
                                  nn.LeakyReLU(negative_slope = leak),
                                  nn.Conv2d(32, num_classes,kernel_size=3, padding=1),
-                                 nn.BatchNorm2d(num_classes),
-                                 nn.Softmax(dim = 2))
+                                 activation_out)
         
         self.pool = nn.MaxPool2d(2, 2)
                                  
@@ -217,7 +218,7 @@ class Maxout2d(nn.Module):
 
 class BinaryOut(nn.Module):
 
-    def __init__(self, W_d4, H_d4, weight_scale = True):
+    def __init__(self, W_d4, H_d4, activation_out, weight_scale = True):
         
         super().__init__()
         self.down = nn.Sequential(nn.Conv2d(256, 64, kernel_size=3, padding=1),
@@ -229,10 +230,14 @@ class BinaryOut(nn.Module):
                                    nn.Conv2d(32, 32, kernel_size=3, padding=1),
                                    nn.BatchNorm2d(32),
                                    Maxout2d(32, 16, 4))
+        
+        if isinstance(activation_out, nn.Softmax):
+            activation_out = activation_out(dim=0)
+            
         self.lin = nn.Sequential(nn.Linear(W_d4 * H_d4 * 16, 2),
                                  nn.BatchNorm2d(2),
-                                 nn.Softmax(dim = 0))
-        
+                                 activation_out)
+                
         if weight_scale:
             self.init_params()
 
