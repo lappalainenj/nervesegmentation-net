@@ -5,7 +5,7 @@ import numpy as np
 import torch
 import torch.utils.data as data
 from PIL import Image
-from torchvision import transforms
+
 
 
 SEG_LABELS_LIST = [  
@@ -15,7 +15,8 @@ SEG_LABELS_LIST = [
 class SegmentationData(data.Dataset):
 
     def __init__(self, image_paths_file, transform = None, mode = 'train', 
-                 num_train = 3381, num_val = 1127, num_test = 1127):
+                 num_train = 3381, num_val = 1127, num_test = 1127,
+                 binary_out = True, mask_only = False):
         """
         Returns the data object that can be loaded with pytorch
         (i.e. torch.utils.data.DataLoader( object ) ).
@@ -31,17 +32,17 @@ class SegmentationData(data.Dataset):
         -----
         
         """
-        self.root_dir_name = os.path.dirname(image_paths_file)
+        self.root_dir_name = '../data/'
         
         self.num_train = num_train
         self.num_val = num_val  
         self.num_test = num_test
         self.transform = transform
+        self.binary_out = binary_out
+        self.mask_only = mask_only
         
         self.image_names = self.get_image_names(mode, image_paths_file)
-        #with open(image_paths_file) as f:
-        #    self.image_names = f.read().splitlines()
-            
+           
 
     def __getitem__(self, key):
         if isinstance(key, slice):
@@ -63,63 +64,47 @@ class SegmentationData(data.Dataset):
 
     def get_item_from_index(self, index):
         
+        targets = {}
         img_id = self.image_names[index].replace('.tif', '')
-
-        img = Image.open(os.path.join(self.root_dir_name,
-                                      'images',
-                                      img_id + '.tif'))
+        
         target = Image.open(os.path.join(self.root_dir_name,
                                  'targets',
                                  img_id + '_mask.tif'))
         
-        targets_binary = int(np.sum(np.array(target)) > 0)
+        if self.mask_only and int(np.sum(np.array(target)) == 0):
+            try:
+                return self.__getitem__(index + 1)
+            except IndexError:
+                rnd = int(np.random.randint(0, len(self.image_names), 1)[0])
+                return self.__getitem__(rnd)
+
+        img = Image.open(os.path.join(self.root_dir_name,
+                                      'images',
+                                      img_id + '.tif'))
+        
         
         if self.transform:
-            inputs, targets = self._transform(img, target)
+            inputs, target = self.transform([img, target])
         
-        targets = self._labelize(targets)
-        targets['down5'] = targets_binary
+        inputs = torch.FloatTensor(inputs)
+        targets['main'] = self._labelize(target)
+        
+        if self.binary_out:
+            binary_targets = int(np.sum(np.array(target)) > 0)
+            #binary_targets = np.zeros([2])
+            #binary_targets[int(np.sum(np.array(target)) > 0)] = 1
+            targets['binary'] = binary_targets
             
         return inputs, targets
     
-    def _transform(self, img, target):
-        
-        targets = {}
-        keys = ['in', 'up4', 'up5']
-        
-        resize_transforms = self.transform[0:3]
-        random_transforms = self.transform[3]
-        
-        inputs = resize_transforms[0](img)
-        
-        for i, transformation in enumerate(resize_transforms):
+    def _labelize(self, target):
+                
+        target = target.numpy()
+        target_labels = np.where(target != 0, 1, 0)
             
-            targets[keys[i]] = transformation(target)
-        
-        rt = random_transforms([inputs] + list(targets.values()))
-        
-        inputs = rt[0]
-        
-        for i, key in enumerate(keys, 1):
-            
-            targets[key] = rt[i]
-             
-        return inputs, targets
-    
-    def _labelize(self, sample):
-        
-        targets = list(sample.values())
-        #to_tensor = transforms.ToTensor()
-        
-        for i, key in enumerate(sample.keys()):
-            
-            target = targets[i].numpy()
-            target_labels = np.where(target != 0, 1, 0)
-            
-            sample[key] = torch.FloatTensor(target_labels)
-           # print(sample[key].size())
-        
-        return sample
+        target_labels = torch.FloatTensor(target_labels)
+           
+        return target_labels
             
     
     def get_image_names(self, mode, image_paths_file):
@@ -167,14 +152,14 @@ class SegmentationData(data.Dataset):
         optional: image_name
         
         '''
-        
         X, y = self.get_item_from_index(index)
+        y = y['main']
         if return_image_name:
-            return np.squeeze(X.numpy()), y.numpy(), self.image_names[index]
+            return X.squeeze().numpy(), y.squeeze().numpy(), self.image_names[index]
         else:
-            return np.squeeze(X.numpy()), y.numpy()
+            return X.squeeze().numpy(), y.squeeze().numpy()
         
-    def show_image(self, index, thickness = 1, cmap = 'gray'):
+    def show_image(self, index, thickness = 3, cmap = 'gray'):
         '''Plots a certain image.
         
         Parameters:
@@ -186,8 +171,7 @@ class SegmentationData(data.Dataset):
         
         Returns:
         --------
-        fig = matplotlib figure object
-        ax =  matplotlib ax object        
+      
         '''
         import matplotlib.pylab as plt
         X, y, image_name = self.get_image(index, return_image_name = True)
@@ -195,9 +179,15 @@ class SegmentationData(data.Dataset):
         temp1 = mask - np.hstack([np.zeros([mask.shape[0], thickness]), mask[:, 0:-thickness]])
         cropped_mask = np.abs(temp1)      
         print(image_name)
-        plt.imshow(X + cropped_mask, cmap = cmap)
+        
+        ax1 = plt.subplot(131)
+        ax1.imshow(X, cmap = cmap, vmin = 0, vmax = 1)
+        ax2 = plt.subplot(132)
+        ax2.imshow(y)
+        ax3 = plt.subplot(133)
+        ax3.imshow(X + cropped_mask, cmap = cmap, vmin = 0, vmax = 1)        
         plt.show()
-        return plt.gcf(), plt.gca()     
+ 
 
 
 
