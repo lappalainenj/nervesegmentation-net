@@ -1,11 +1,7 @@
-from random import shuffle
 import numpy as np
-import cv2
 import torch
 from torch.autograd import Variable
-#from skimage import transform
-from torchvision import transforms
-from PIL import Image
+
 
 
 class Solver(object):
@@ -16,13 +12,14 @@ class Solver(object):
 
     def __init__(self, optim=torch.optim.Adam, optim_args={},
                  loss_func=torch.nn.BCELoss(),
-                 loss_weights = [1.0, 0.1, 0.05, 0.01]):
+                 binary_out = 0.1, num_classes = 2):
         optim_args_merged = self.default_adam_args.copy()
         optim_args_merged.update(optim_args)
         self.optim_args = optim_args_merged
         self.optim = optim
         self.loss_func = loss_func
-        self.loss_weights = loss_weights
+        self.binary_out = binary_out
+        self.num_classes = num_classes
 
         self._reset_histories()
 
@@ -34,6 +31,9 @@ class Solver(object):
         self.train_acc_history = []
         self.val_acc_history = []
         self.val_loss_history = []
+        if self.binary_out:
+            self.train_bin_acc_history = []
+            self.val_bin_acc_history = []
         
     def dice_coefficient(self, gt, p):
         """gt = ground_truth
@@ -60,7 +60,8 @@ class Solver(object):
         optim = self.optim(filter(lambda p: p.requires_grad, model.parameters()), **self.optim_args)
         
         self._reset_histories()
-        iter_per_epoch = len(train_loader)
+        self.iter_per_epoch = len(train_loader)
+        self.log_nth = log_nth
 
         if torch.cuda.is_available():
             model.cuda()
@@ -68,138 +69,151 @@ class Solver(object):
         print('START TRAIN.')
 
         for epoch in range(num_epochs):
-            # TRAINING
 
             for i, (inputs, targets) in enumerate(train_loader, 1):
-                #inputs contains batchsize input images
+                #inputs contains #batchsize input images
                 #inputs.size() = [batchsize, num_channels, height, width]
                 #targets contains batchsize target images
                 #targets.size() = [batchsize, height, width]
                 
                 inputs = Variable(inputs)
-                keys = ['in', 'up4', 'up5', 'down5']
                 
-                for key in keys:
-                    targets[key] = Variable(targets[key])
+                target_main = Variable(targets['main'])
+                
+                if self.binary_out:
+                    target_binary = Variable(targets['binary'])
 
-                
-                targets1 = targets['in']
-                targets2 = targets['down5']
-                targets3 = targets['up5']
-                targets4 = targets['up4']
-                
-                #print('Shape: Inputs %s // Targets %s'%(inputs.size(), targets.size()))
                 if model.is_cuda:
-                    inputs, targets1 = inputs.cuda(), targets1.cuda()
-                    targets2, targets3 = targets2.cuda(), targets3.cuda()
-                    targets4 = targets4.cuda()
+                    inputs = inputs.cuda()
+                    target_main = target_main.cuda()
+                    if self.binary_out:
+                        target_binary = target_binary.cuda()
                     
                 optim.zero_grad()
                 outputs = model(inputs)
-                #outputs contains num_outputs*batchsize output images
-                #outputs.size() = [num_outputs, batchsize, channels, height, width]
-                #print('Shape: Outputs ', outputs.size())
-
-                #outputs = list(map(lambda x: x.squeeze(), outputs))
-
-                loss1 = self.loss_func(outputs[0].float(), targets1.float())
-                loss2 = self.loss_func(outputs[1].squeeze().float(), targets2.float()) 
-                loss3 = self.loss_func(outputs[2].float(), targets3.float())              
-                loss4 = self.loss_func(outputs[3].float(), targets4.float())
                 
-                total_loss = sum([w*l for w,l in 
-                          zip(self.loss_weights,[loss1, loss2, loss3, loss4])])
+                loss = self.loss_func(outputs['main'].float(), target_main.float())
                 
-                total_loss.backward()
+                if self.binary_out:
+                    binary_loss = self.loss_func(outputs['binary'].float(),
+                                                 target_binary.float())
+                    loss = loss + binary_loss
+                
+                loss.backward()
                 optim.step()
 
-                self.train_loss_history.append(total_loss.data.cpu().numpy())
+                self.train_loss_history.append(loss.data.cpu().numpy())
                 
                 if log_nth and i % log_nth == 0:
                     
-                    last_log_nth_losses = self.train_loss_history[-log_nth:]
-                    train_loss = np.mean(last_log_nth_losses)
-                    print('[Iteration %d/%d] TRAIN loss: %.3f' % \
-                        (i + epoch * iter_per_epoch,
-                         iter_per_epoch * num_epochs,
-                         train_loss))
-
-            #_, preds = torch.max(outputs, 1) 
-            #torch.max(outputs, 1) takes max over channels, we have just one
-
-            gt = np.squeeze(targets1.data.cpu().numpy()) 
-            p  = outputs[0].data.cpu().numpy()
-
-            train_acc = self.dice_coefficient(gt, p)
+                    self.print_iteration_results(i, epoch, num_epochs, 'TRAIN')
+            
+            if self.num_classes == 2:
+                pred_prob, pred_label = torch.max(outputs['main'], 1)
+                pred = pred_label.unsqueeze(1)
+                if self.binary_out:
+                    bin_prob, binary = torch.max(outputs['binary'], 1)
+                    binary = binary.unsqueeze(1)
+            else:
+                pred = outputs['main']
+                if self.binary_out:
+                    binary = outputs['binary']
+                
+            train_acc = 1 - self.loss_func(pred.float(), target_main.float())
             self.train_acc_history.append(train_acc)
-            if log_nth:
-                print('[Epoch %d/%d] TRAIN acc/loss: %.3f/%.3f' % (epoch + 1,
-                                                                   num_epochs,
-                                                                   train_acc,
-                                                                   train_loss))
-            # VALIDATION
-            val_losses = []
-            val_scores = []
-            model.eval()
-            for inputs, targets in val_loader:
+                                 
+            if self.binary_out:
+                bin_acc = 1 - self.loss_func(binary.float(), target_binary.float())
+                self.train_bin_acc_history.append(bin_acc)
+                self.print_epoch_results(bin_acc, epoch, num_epochs, 'TRAIN BINARY')
+                                                 
+            self.print_epoch_results(train_acc, epoch, num_epochs, 'TRAIN')
                 
-                inputs = Variable(inputs)
-                keys = ['in', 'up4', 'up5', 'down5']
-                
-                for key in keys:
-                    targets[key] = Variable(targets[key])
+            self.validation(model, val_loader, optim, epoch, num_epochs)
 
-                
-                targets1 = targets['in']
-                targets2 = targets['down5'].squeeze()
-                targets3 = targets['up5']
-                targets4 = targets['up4']
-
-                if model.is_cuda:
-                    inputs, targets1 = inputs.cuda(), targets1.cuda()
-                    targets2, targets3 = targets2.cuda(), targets3.cuda()
-                    targets4 = targets4.cuda()
-                    
-                optim.zero_grad()
-                outputs = model(inputs)
-
-
-                #outputs = list(map(lambda x: x.squeeze(), outputs))
-                for out in outputs:
-                    print(out.size())
-                loss1 = self.loss_func(outputs[0].float(), targets1.float())
-                loss2 = self.loss_func(outputs[1].squeeze().float(), targets2.float()) 
-                loss3 = self.loss_func(outputs[2].float(), targets3.float())              
-                loss4 = self.loss_func(outputs[3].float(), targets4.float())
-                
-                total_loss = sum([w*l for w,l in 
-                          zip(self.loss_weights,[loss1, loss2, loss3, loss4])])
-
-                val_losses.append(total_loss.data.cpu().numpy())
-
-                
-                gt = np.squeeze(targets1.data.cpu().numpy()) 
-                p  = outputs[0].data.cpu().numpy()
-                scores = self.dice_coefficient(gt, p)
-                val_scores.append(scores)
-
-            model.train()
-            val_acc, val_loss = np.mean(val_scores), np.mean(val_losses)
-            self.val_acc_history.append(val_acc)
-            self.val_loss_history.append(val_loss)
-            if log_nth:
-                print('[Epoch %d/%d] VAL   acc/loss: %.3f/%.3f' % (epoch + 1,
-                                                                   num_epochs,
-                                                                   val_acc,
-                                                                   val_loss))
-        ########################################################################
-        #                             END OF YOUR CODE                         #
-        ########################################################################
         print('FINISH.')
+
+    def validation(self, model, val_loader, optim, epoch, num_epochs):
+                
+        val_losses = []
+        val_scores = []
+        bin_scores = []
+        model.eval()
+        for inputs, targets in val_loader:
+            
+            inputs = Variable(inputs)
         
-def _resize(Y, outshape):
-    transform = transforms.ToPILImage()
-    img = transform(Y.data.cpu().numpy())
-    resized = Image.resize(img, outshape)
-    transform = transforms.ToTensor()
-    return transform(resized)
+            target_main = Variable(targets['main'])
+            
+            if self.binary_out:
+                target_binary = Variable(targets['binary'])
+
+            if model.is_cuda:
+                inputs = inputs.cuda()
+                target_main = target_main.cuda()
+                if self.binary_out:
+                    target_binary = target_binary.cuda()
+                
+            optim.zero_grad()
+            outputs = model(inputs)
+
+            loss = self.loss_func(outputs['main'].float(), target_main.float())
+        
+            if self.binary_out:
+                binary_loss = self.loss_func(outputs['binary'].float(),
+                                             target_binary.unsqueeze(1).float())
+                loss = loss + binary_loss
+
+            val_losses.append(loss.data.cpu().numpy())
+            
+            if self.num_classes == 2:
+                pred_prob, pred_label = torch.max(outputs['main'], 1)
+                pred = pred_label.unsqueeze(1)
+                if self.binary_out:
+                    bin_prob, binary = torch.max(outputs['binary'], 1)
+                    binary = binary.unsqueeze(1)
+            else:
+                pred = outputs['main']
+                if self.binary_out:
+                    binary = outputs['binary']
+                
+            if self.binary_out:
+                bin_acc = 1 - self.loss_func(binary.float(), target_binary.float())
+                bin_scores.append(bin_acc)
+                
+            scores = 1 - self.loss_func(pred.float(), target_main.float())
+            val_scores.append(scores)
+
+        model.train()
+        val_acc, val_loss = np.mean(val_scores), np.mean(val_losses)
+        
+        if self.binary_out:
+            val_bin_acc = np.mean(bin_scores)
+            self.val_bin_acc_history.append(val_bin_acc)
+            self.print_epoch_results(val_bin_acc, epoch, num_epochs, 'VAL BINARY')
+            
+        self.val_acc_history.append(val_acc)
+        self.val_loss_history.append(val_loss)
+        self.print_epoch_results(val_acc, epoch, num_epochs, 'VAL')
+        
+      
+    def print_iteration_results(self, i, epoch, num_epochs, mode):
+        '''Print iteration results'''
+        
+        iter_per_epoch = self.iter_per_epoch
+        last_log_nth_losses = self.train_loss_history[-self.log_nth:]
+        train_loss = np.mean(last_log_nth_losses)
+        phrase = '|Iteration %d/%d| %s loss: %.3f'
+        display = (i + epoch * iter_per_epoch, iter_per_epoch * num_epochs,
+                   mode, train_loss)
+        print(phrase%display)
+        
+    def print_epoch_results(self, train_acc, epoch, num_epochs, mode):
+        '''Print epoch results'''
+
+        phrase = '|Epoch %d/%d| %s acc: %.3f'
+        display = (epoch + 1, num_epochs, mode, train_acc)
+        print(phrase%display)
+        
+                
+    

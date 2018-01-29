@@ -1,111 +1,101 @@
-"""SegmentationNN"""
 import torch
 import torch.nn as nn
-#import torch.nn.functional as F
+from torch.nn import init
 
 class NerveNET(nn.Module):
 
     def __init__(self, input_dim = (1, 128, 128), num_classes=2,
-                 weight_scale = 0, dropout = 0.25, leak = 0.01):
+                 weight_scale = True, dropout = 0.1,
+                 binary_out = True, upsample_unit = 'Upsample'):
         super(NerveNET, self).__init__()
         
         in_channels, W, H = input_dim
+        self.binary_out = binary_out
+        self.upsample_unit = upsample_unit
+        self.dropout = dropout
+        
+        if num_classes > 1:
+           activation_out = nn.Softmax(dim = 1)
+        else:
+            activation_out = nn.Sigmoid()
+        
+        assert upsample_unit in ['Upsample', 'ConvTranspose2d']
+        if upsample_unit == 'Upsample':
+            upsample_units = []
+            upsample_units = [nn.Upsample(scale_factor = 2) for x in range(4)]
+        elif upsample_unit == 'ConvTranspose2d':
+            upsample_units = []
+            upsample_units.append(nn.ConvTranspose2d(512,512,kernel_size=2,stride=2,padding=0))
+            upsample_units.append(nn.ConvTranspose2d(256,256,kernel_size=2,stride=2,padding=0))
+            upsample_units.append(nn.ConvTranspose2d(128,128,kernel_size=2,stride=2,padding=0))
+            upsample_units.append(nn.ConvTranspose2d(64, 64,kernel_size=2,stride=2,padding=0))
+        
 
-        self.down1 = nn.Sequential(nn.Dropout(p = dropout),
-                                   nn.BatchNorm2d(1),
+        self.down1 = nn.Sequential(nn.Dropout(p = self.dropout),
                                    nn.Conv2d(in_channels, 32, kernel_size=3, padding=1),
-                                   nn.LeakyReLU(negative_slope = leak),
                                    nn.BatchNorm2d(32),
-                                   nn.Conv2d(32, 32, kernel_size=3, padding=1),
-                                   Maxout2d(32, 16, 2),
-                                   nn.MaxPool2d(2, 2),
-                                   nn.BatchNorm2d(16))
-        self.down2 = nn.Sequential(nn.Dropout(p = dropout),
-                                   nn.Conv2d(16, 32, kernel_size=3, padding=1),
-                                   nn.LeakyReLU(negative_slope = leak),
-                                   nn.BatchNorm2d(32),
-                                   nn.Conv2d(32, 32, kernel_size=3, padding=1),
-                                   Maxout2d(32, 16, 2),
-                                   nn.MaxPool2d(2, 2),
-                                   nn.BatchNorm2d(16))
-        self.down3 = nn.Sequential(nn.Dropout(p = dropout),
-                                   nn.Conv2d(16, 32, kernel_size=3, padding=1),
-                                   nn.LeakyReLU(negative_slope = leak),
-                                   nn.BatchNorm2d(32),
-                                   nn.Conv2d(32, 32, kernel_size=3, padding=1),
-                                   Maxout2d(32, 16, 2),
-                                   nn.MaxPool2d(2, 2),
-                                   nn.BatchNorm2d(16))
-        self.down4 = nn.Sequential(nn.Dropout(p = dropout),
-                                   nn.Conv2d(16, 32, kernel_size=3, padding=1),
-                                   nn.LeakyReLU(negative_slope = leak),
-                                   nn.BatchNorm2d(32),
-                                   nn.Conv2d(32, 32, kernel_size=3, padding=1),
-                                   Maxout2d(32, 16, 2),
-                                   nn.MaxPool2d(2, 2),
-                                   nn.BatchNorm2d(16))     
-        self.down5 = nn.Sequential(nn.Dropout(p = dropout),
-                                   nn.Conv2d(16, 32, kernel_size=3, padding=1),
-                                   nn.LeakyReLU(negative_slope = leak),
-                                   nn.BatchNorm2d(32),
-                                   nn.Conv2d(32, 32, kernel_size=3, padding=1),
-                                   Maxout2d(32, 16, 2),
-                                   nn.MaxPool2d(2, 2),
-                                   nn.BatchNorm2d(16))
+                                   nn.ReLU())
+                               
+        self.down2 = nn.Sequential(nn.Dropout(p = self.dropout),
+                                   nn.Conv2d(32, 64, kernel_size=3, padding=1),
+                                   nn.BatchNorm2d(64),
+                                   nn.ReLU())
         
-        W_d5 = int((W / 2**4 - 2) / 2 + 1)
-        H_d5 = int((H / 2**4 - 2) / 2 + 1)
+        self.down3 = nn.Sequential(nn.Dropout(p = self.dropout),
+                                   nn.Conv2d(64, 128, kernel_size=3, padding=1),
+                                   nn.BatchNorm2d(128),
+                                   nn.ReLU())
         
-        self.out00 = nn.Sequential(nn.Linear(W_d5 * H_d5 * 16, 32),
-                                   nn.LeakyReLU(negative_slope = leak),
-                                   nn.BatchNorm2d(32),
-                                   nn.Linear(32, 16),
-                                   nn.LeakyReLU(negative_slope = leak),
-                                   nn.BatchNorm2d(16),
-                                   nn.Linear(16, 1),
-                                   nn.Sigmoid())
+        self.down4 = nn.Sequential(nn.Dropout(p = self.dropout),
+                                   nn.Conv2d(128, 256, kernel_size=3, padding=1),
+                                   nn.BatchNorm2d(256),
+                                   nn.ReLU())
         
-        self.up5 = nn.Sequential(nn.Conv2d(16, 16, kernel_size=3, padding=1),
-                                 Maxout2d(16, 8, 2),
-                                 nn.BatchNorm2d(8),
-                                 nn.Upsample(scale_factor = 2))      
-
-        self.out01 = nn.Sequential(nn.Conv2d(8, 1, kernel_size=3, padding=1),
-                                   nn.Sigmoid())
+        self.bottom = nn.Sequential(nn.Conv2d(256, 512, kernel_size=3, padding=1),
+                                    nn.BatchNorm2d(512),
+                                    nn.ReLU(),
+                                    upsample_units[0],
+                                    nn.BatchNorm2d(512),
+                                    nn.ReLU())     
         
-        self.up4 = nn.Sequential(nn.Conv2d(24, 16, kernel_size=3, padding=1),
-                                 Maxout2d(16, 8, 2),
-                                 nn.BatchNorm2d(8),
-                                 nn.Upsample(scale_factor = 2))
-
-        self.out02 = nn.Sequential(nn.Conv2d(8, 1, kernel_size=3, padding=1),
-                                   nn.Sigmoid())        
+        W_b = int((W / 2**2 - 2) / 2 + 1)
+        H_b = int((H / 2**2 - 2) / 2 + 1)
         
-        self.up3 = nn.Sequential(nn.Conv2d(24, 16, kernel_size=3, padding=1),
-                                 Maxout2d(16, 8, 2),
-                                 nn.BatchNorm2d(8), 
-                                 nn.Upsample(scale_factor = 2))
-        self.up2 = nn.Sequential(nn.Conv2d(24, 16, kernel_size=3, padding=1),
-                                 Maxout2d(16, 8, 2),
-                                 nn.BatchNorm2d(8),
-                                 nn.Upsample(scale_factor = 2))
-        self.up1 = nn.Sequential(nn.Conv2d(24, 16, kernel_size=3, padding=1),
-                                 Maxout2d(16, 8, 2),
-                                 nn.BatchNorm2d(8),
-                                 nn.Upsample(scale_factor = 2))
+        self.binary = BinaryOut(W_b, H_b, activation_out, num_classes,
+                                weight_scale)
         
-        self.out = nn.Sequential(nn.Dropout(p = dropout),
-                                 nn.Conv2d(8, 8, kernel_size=3, padding=1),
-                                 nn.LeakyReLU(negative_slope = leak),
-                                 nn.BatchNorm2d(8),
-                                 nn.Conv2d(8, 8, kernel_size=3, padding=1),
-                                 nn.LeakyReLU(negative_slope = leak),
-                                 nn.BatchNorm2d(8),
-                                 nn.Conv2d(8, in_channels, kernel_size=3, padding=1),
-                                 nn.Sigmoid())
+        self.up4 = nn.Sequential(nn.Conv2d(768, 256, kernel_size=3, padding=1),
+                                 nn.BatchNorm2d(256),
+                                 nn.ReLU(),
+                                 upsample_units[1],
+                                 nn.BatchNorm2d(256),
+                                 nn.ReLU())
+     
+        
+        self.up3 = nn.Sequential(nn.Conv2d(384, 128, kernel_size=3, padding=1),
+                                 nn.BatchNorm2d(128), 
+                                 nn.ReLU(),
+                                 upsample_units[2],
+                                 nn.BatchNorm2d(128), 
+                                 nn.ReLU())
+        
+        self.up2 = nn.Sequential(nn.Conv2d(192, 64, kernel_size=3, padding=1),
+                                 nn.BatchNorm2d(64),
+                                 nn.ReLU(),
+                                 upsample_units[3],
+                                 nn.BatchNorm2d(64),
+                                 nn.ReLU())
+        
+        self.out = nn.Sequential(nn.Conv2d(96, 32, kernel_size=3, padding=1),
+                                 nn.BatchNorm2d(32),
+                                 nn.ReLU(),
+                                 nn.Conv2d(32, num_classes,kernel_size=3, padding=1),
+                                 activation_out)
+        
+        self.pool = nn.MaxPool2d(2, 2)
                                  
-        if weight_scale > 0.:
-            self.init_weightscale(weight_scale)
+        if weight_scale:
+            self.init_params()
 
 
     def forward(self, x):
@@ -116,64 +106,58 @@ class NerveNET(nn.Module):
         Inputs:
         - x: PyTorch input Variable
         """
+        out = {}
+        down1 = self.down1(x) #1 - 32
+        down2 = self.down2(self.pool(down1)) #32 - 64
+        down3 = self.down3(self.pool(down2)) #64 - 128
+        down4 = self.down4(self.pool(down3)) #128 - 256
+        
+        bottom = self.bottom(self.pool(down4)) #256 - 512
+        bottom_down4 = torch.cat([bottom, down4], dim = 1) #768
+        up4 = self.up4(bottom_down4) #768 - 256
+        up4_down3 = torch.cat([up4, down3], dim = 1) #384
+        up3 = self.up3(up4_down3) #384 - 128
+        up3_down2 = torch.cat([up3, down2], dim = 1) #192
+        up2 = self.up2(up3_down2) #192 - 64 
+        up2_down1 = torch.cat([up2, down1], dim = 1) #96
+        
+        out['main'] = self.out(up2_down1) #96 - 2
+        
+        if self.binary_out:
+            out['binary'] = self.binary(bottom) 
+        
+        return out
+                        
+    def weight_init(self, m):
+        if isinstance(m, nn.Conv2d) or isinstance(m, nn.Linear)\
+        or isinstance(m, nn.ConvTranspose2d):
+            init.xavier_normal(m.weight)
+            init.constant(m.bias, 0)
 
-        down1 = self.down1(x)
-        down2 = self.down2(down1)
-        down3 = self.down3(down2)
-        down4 = self.down4(down3)
-        down5 = self.down5(down4)
-        
-        out00 = self.out00(down5.view(down5.size()[0], -1))
-        
-        up5 = self.up5(down5)
-        up5_down4 = torch.cat([up5, down4], dim = 1)
-        
-        out01 = self.out01(up5)
-        
-        up4 = self.up4(up5_down4)
-        #print(up4.size())
-        up4_down3 = torch.cat([up4, down3], dim = 1)
-        
-        #print(up4.size())
-        out02 = self.out02(up4)
-        #print(out02.size())
-        
-        up3 = self.up3(up4_down3)
-        up3_down2 = torch.cat([up3, down2], dim = 1)
-        
-        up2 = self.up2(up3_down2)
-        up2_down1 = torch.cat([up2, down1], dim = 1)
-        
-        up1 = self.up1(up2_down1)
-        
-        out = self.out(up1)
-        
-        return out, out00, out01, out02
 
-    
+    def init_params(self):
+        for i, m in enumerate(self.modules()):
+            self.weight_init(m)
+            
     def init_weightscale(self, weight_scale):
         
         units = [self.down1,
                   self.down2,
                   self.down3,
                   self.down4,
-                  self.down5,
-                  self.out00,
-                  self.out01,
-                  self.out02,
-                  self.up5,
+                  self.binary.modules(),
+                  self.bottom,
                   self.up4,
                   self.up3,
                   self.up2,
-                  self.up1,
                   self.out]
         
         for _unit in units:
             
-            for _layer in _unit:
+            for l in _unit:
                 
-                if isinstance(_layer, nn.Conv2d or nn.Linear):
-                        _layer.weight.data.mul_(weight_scale)
+                if isinstance(l, nn.Conv2d) or isinstance(l, nn.Linear):
+                        l.weight.data.mul_(weight_scale)
 
                     
     @property
@@ -193,27 +177,6 @@ class NerveNET(nn.Module):
         """
         print('Saving model... %s' % path)
         torch.save(self, path)
-
-
-#class Maxout2d(nn.Module):
-#
-#    def __init__(self, in_channels, out_channels, pool_size):
-#        super(Maxout2d, self).__init__()
-#        self.in_channels, self.out_channels, self.pool_size = in_channels, out_channels, pool_size
-#        self.conv2d = nn.Conv2d(in_channels, out_channels * pool_size, kernel_size=1, stride=1, padding=0)
-#        self.bn = nn.BatchNorm2d(out_channels * pool_size)
-#
-#    def forward(self, x):
-#        N,C,H,W  = list(x.size())
-#        out = self.conv2d(x)
-#        out = self.bn(out)
-#
-#        out = out.permute(0, 2, 3, 1)
-#        m, i = out.contiguous().view(N*H*W,self.out_channels,self.pool_size).max(2)
-#        m = m.squeeze(2)
-#        m = m.view(N,H,W,self.out_channels)
-#        m = m.permute(0, 3, 1, 2)
-#        return m
 
 class Maxout2d(nn.Module):
 
@@ -248,5 +211,41 @@ class Maxout2d(nn.Module):
         out, i = out.max(max_dim) #take the max out of the pool
         out = out.permute(0, 3, 1, 2) #permute back to [batch_size, num_channels, H, W]
         return out
+
+class BinaryOut(nn.Module):
+
+    def __init__(self, W_b, H_b, activation_out, num_classes,
+                 weight_scale):
+        
+        super().__init__()
+        self.down = nn.Sequential(nn.Conv2d(512, 512, kernel_size=5, padding=2),
+                                   nn.BatchNorm2d(512),
+                                   nn.ReLU())
+        
+        if isinstance(activation_out, nn.Softmax):
+            activation_out = nn.Softmax(dim = 1)
+            
+        self.lin = nn.Sequential(nn.Linear(W_b * H_b * 512, 256),
+                                 nn.ReLU(),
+                                 nn.Linear(256, num_classes),
+                                 activation_out)
+                
+        if weight_scale:
+            self.init_params()
+
+
+    def forward(self, inputs):
+        out = self.down(inputs).contiguous()
+        out = self.lin(out.view(out.size()[0],-1))
+        return out
+    
+    def weight_init(self, m):
+        if isinstance(m, nn.Conv2d) or isinstance(m, nn.Linear):
+            init.xavier_normal(m.weight)
+            init.constant(m.bias, 0)
+
+    def init_params(self):
+        for i, m in enumerate(self.modules()):
+            self.weight_init(m)
 
 
