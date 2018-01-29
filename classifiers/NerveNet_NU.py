@@ -15,7 +15,8 @@ class NerveNET(nn.Module):
         
         if num_classes > 1:
            activation_out = nn.Softmax(dim = 2)
-        activation_out = nn.Sigmoid()
+        else:
+            activation_out = nn.Sigmoid()
         
         assert upsample_unit in ['Upsample', 'ConvTranspose2d']
         if upsample_unit == 'Upsample':
