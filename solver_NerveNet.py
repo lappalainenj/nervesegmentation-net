@@ -104,8 +104,7 @@ class Solver(object):
 
                 self.train_loss_history.append(loss.data.cpu().numpy())
                 
-                if log_nth and i % log_nth == 0:
-                    
+                if log_nth and i % log_nth == 0:                   
                     self.print_iteration_results(i, epoch, num_epochs, 'TRAIN')
             
             if self.num_classes == 2:
@@ -125,11 +124,11 @@ class Solver(object):
             if self.binary_out:
                 bin_acc = 1 - self.loss_func(binary.float(), target_binary.float())
                 self.train_bin_acc_history.append(bin_acc)
-                self.print_epoch_results(bin_acc, epoch, num_epochs, 'TRAIN BINARY')
+                self.print_epoch_results(np.mean(self.train_bin_acc_history), epoch, num_epochs, 'TRAIN BINARY')
                                                  
-            self.print_epoch_results(train_acc, epoch, num_epochs, 'TRAIN')
+            self.print_epoch_results(np.mean(self.train_acc_history), epoch, num_epochs, 'TRAIN')
                 
-            self.validation(model, val_loader, optim, epoch, num_epochs)
+            #self.validation(model, val_loader, optim, epoch, num_epochs)
 
         print('FINISH.')
 
