@@ -81,12 +81,12 @@ class Solver(object):
                 optim.zero_grad()
                 outputs = model(inputs)
 
-                loss = self.loss_func(outputs['main'].float(), target_main.float())
-                
                 if self.binary_out:
-                    binary_loss = self.loss_func(outputs['binary'].float(),
-                                                 target_binary.float())
-                    loss = loss + binary_loss
+                    print(outputs['binary'], target_binary)
+                    loss = self.loss_func(outputs['binary'].float(),
+                                                 target_binary.long())
+                else:
+                    loss = self.loss_func(outputs['main'].float(), target_main.float())
                 
                 loss.backward()
                 optim.step()
@@ -140,13 +140,12 @@ class Solver(object):
                 
             optim.zero_grad()
             outputs = model(inputs)
-
-            loss = self.loss_func(outputs['main'].float(), target_main.float())
         
             if self.binary_out:
-                binary_loss = self.loss_func(outputs['binary'].float(),
+                loss = self.loss_func(outputs['binary'].float(),
                                              target_binary.unsqueeze(1).float())
-                loss = loss + binary_loss
+            else:
+                loss = self.loss_func(outputs['main'].float(), target_main.float())
 
             val_losses.append(loss.data.cpu().numpy())
             

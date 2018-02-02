@@ -22,8 +22,8 @@ class SegmentationNN(nn.Module):
         self.down4 = segnetDown3(256, 512)
         self.down5 = segnetDown3(512, 512)
         
-        W_b = int((W / 2**5 - 2) / 2 + 1)
-        H_b = int((H / 2**5 - 2) / 2 + 1)
+        W_b = int((W / 2**4 - 2) / 2 + 1)
+        H_b = int((H / 2**4 - 2) / 2 + 1)
         self.binary = BinaryOut(W_b, H_b, nn.Softmax(), num_classes, True)
         
         self.up5 = segnetUp3(512, 512)
