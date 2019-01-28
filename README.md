@@ -12,7 +12,6 @@ Accurately identifying nerve structures in ultrasound images is a critical step 
 
 #### Results
 
-Check out our poster:
 ![diagram](poster.png)
 
 #### Installation
